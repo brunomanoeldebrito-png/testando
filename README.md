@@ -7,7 +7,7 @@
 	 initial-scale=1.0">
 	       <title> impressão rapida</title>
 		   <style>
-		       <body>
+		       body {
 			      <h1> Sejam muito bem vindo como posso ajuda</h1>
 				  <p>site de teste, to testando meu talendo</p>
 				  background-colo: red
