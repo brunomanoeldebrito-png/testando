@@ -1,153 +1,188 @@
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Soccer</title>
-<style>
-  body { margin:0; font-family: Arial; background:#222; color:#fff; text-align:center; }
-  #menu, #game, #shop { display:none; padding-top:30px; }
-  .active { display:block; }
-  button { padding:10px 20px; margin:5px; cursor:pointer; }
-  canvas { background:green; display:block; margin:20px auto; border:2px solid #fff; }
-  input { padding:5px; margin:5px; }
-</style>
-</head>
-<body>
+# rubisxxx.py - RubisXXX Completão com limites e bloqueio automático
+import os
+import sqlite3
+from flask import Flask, request, session, redirect, url_for, render_template_string, jsonify
+from datetime import datetime, timedelta
 
-<div id="menu" class="active">
-  <h1>Soccer</h1>
-  <input type="text" id="teamName" placeholder="Nome do seu time" />
-  <button onclick="startGame()">Criar Time e Jogar</button>
-  <button onclick="openShop()">Loja de Jogadores</button>
-</div>
+app = Flask(__name__)
+app.secret_key = "rubisxxx-secret"
 
-<div id="game">
-  <h2 id="teamDisplay"></h2>
-  <p>Moedas: <span id="coinsDisplay">0</span></p>
-  <canvas id="field" width="600" height="400"></canvas>
-  <div>
-    <button onclick="goMenu()">Voltar ao Menu</button>
-    <button onclick="winMatch()">Vencer Partida (+10 moedas)</button>
-  </div>
-</div>
+DB_NAME = "rubisxxx.db"
 
-<div id="shop">
-  <h2>Loja de Jogadores</h2>
-  <p>Moedas: <span id="coinsDisplayShop">0</span></p>
-  <div id="playerList"></div>
-  <button onclick="closeShop()">Voltar</button>
-</div>
+# --- Banco de dados ---
+def init_db():
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    # tabela de usuários
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            email TEXT UNIQUE,
+            password TEXT,
+            full_name TEXT,
+            nickname TEXT,
+            plan TEXT DEFAULT 'free',
+            hours_used INTEGER DEFAULT 0,
+            images_used INTEGER DEFAULT 0,
+            last_login DATETIME
+        )
+    """)
+    # tabela de mensagens
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            role TEXT,
+            content TEXT,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.commit()
+    conn.close()
 
-<script>
-// --- Variáveis do Jogo ---
-const menu = document.getElementById('menu');
-const game = document.getElementById('game');
-const shop = document.getElementById('shop');
-const teamDisplay = document.getElementById('teamDisplay');
-const coinsDisplay = document.getElementById('coinsDisplay');
-const coinsDisplayShop = document.getElementById('coinsDisplayShop');
+init_db()
 
-const canvas = document.getElementById('field');
-const ctx = canvas.getContext('2d');
-
-let coins = Number(localStorage.getItem('soccerCoins')) || 0;
-let teamName = localStorage.getItem('soccerTeam') || "Meu Time";
-
-let player = { x: 300, y: 200, size: 15, color: 'blue' };
-let ball = { x: 300, y: 200, size: 8, color: 'white' };
-
-// Jogadores disponíveis na loja
-const availablePlayers = [
-  { name: "Jogador A", price: 10 },
-  { name: "Jogador B", price: 20 },
-  { name: "Jogador C", price: 30 }
-];
-
-// --- Funções ---
-function startGame(){
-  teamName = document.getElementById('teamName').value || teamName;
-  localStorage.setItem('soccerTeam', teamName);
-  teamDisplay.textContent = "Time: " + teamName;
-  coinsDisplay.textContent = coins;
-  coinsDisplayShop.textContent = coins;
-  menu.classList.remove('active');
-  game.classList.add('active');
-  drawField();
+# --- Limites ---
+PLAN_LIMITS = {
+    "free": {"hours":24, "images":5},
+    "plus": {"hours":80, "images":20},
+    "pro": {"hours":10000, "images":1000} # basicamente ilimitado
 }
 
-function goMenu(){
-  menu.classList.add('active');
-  game.classList.remove('active');
-}
+# --- Templates (HTML embutido) ---
+login_template = """ ... mesmo template anterior ... """
+chat_template = """ ... mesmo template anterior ... """
 
-function drawField(){
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-  ctx.fillStyle = 'green';
-  ctx.fillRect(0,0,canvas.width,canvas.height);
-  // jogador
-  ctx.fillStyle = player.color;
-  ctx.beginPath();
-  ctx.arc(player.x, player.y, player.size, 0, Math.PI*2);
-  ctx.fill();
-  // bola
-  ctx.fillStyle = ball.color;
-  ctx.beginPath();
-  ctx.arc(ball.x, ball.y, ball.size, 0, Math.PI*2);
-  ctx.fill();
-}
+# --- Funções auxiliares ---
+def get_user_by_email(email):
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("SELECT * FROM users WHERE email=?",(email,))
+    user = c.fetchone()
+    conn.close()
+    return user
 
-document.addEventListener('keydown', e => {
-  const speed = 5;
-  if(e.key === 'ArrowUp') player.y -= speed;
-  if(e.key === 'ArrowDown') player.y += speed;
-  if(e.key === 'ArrowLeft') player.x -= speed;
-  if(e.key === 'ArrowRight') player.x += speed;
-  drawField();
-});
+def add_user(full_name,nickname,email,password):
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    try:
+        c.execute("INSERT INTO users (full_name,nickname,email,password) VALUES (?,?,?,?)",(full_name,nickname,email,password))
+        conn.commit()
+    except:
+        conn.close()
+        return False
+    conn.close()
+    return True
 
-function winMatch(){
-  coins += 10;
-  localStorage.setItem('soccerCoins', coins);
-  coinsDisplay.textContent = coins;
-  coinsDisplayShop.textContent = coins;
-  alert("Você ganhou 10 moedas!");
-}
+def add_message(user_id,role,content):
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("INSERT INTO messages (user_id,role,content) VALUES (?,?,?)",(user_id,role,content))
+    conn.commit()
+    conn.close()
 
-// --- Loja ---
-function openShop(){
-  menu.classList.remove('active');
-  shop.classList.add('active');
-  renderShop();
-}
+def get_messages(user_id):
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("SELECT role,content FROM messages WHERE user_id=? ORDER BY timestamp ASC",(user_id,))
+    msgs = c.fetchall()
+    conn.close()
+    return msgs
 
-function closeShop(){
-  shop.classList.remove('active');
-  menu.classList.add('active');
-}
+def generate_answer(msg):
+    preview=""
+    if "<html" in msg or "<body" in msg:
+        preview=msg
+    return {"answer": f"(IA Respondeu): {msg}", "preview": preview}
 
-function renderShop(){
-  coinsDisplayShop.textContent = coins;
-  const list = document.getElementById('playerList');
-  list.innerHTML = '';
-  availablePlayers.forEach((p,i)=>{
-    const btn = document.createElement('button');
-    btn.textContent = `${p.name} - ${p.price} moedas`;
-    btn.onclick = ()=>{
-      if(coins >= p.price){
-        coins -= p.price;
-        localStorage.setItem('soccerCoins', coins);
-        coinsDisplay.textContent = coins;
-        coinsDisplayShop.textContent = coins;
-        alert(`${p.name} comprado!`);
-      } else {
-        alert("Moedas insuficientes!");
-      }
-    }
-    list.appendChild(btn);
-  });
-}
-</script>
+def check_limits(user):
+    plan=user[5]
+    hours_used=user[6]
+    images_used=user[7]
+    limits=PLAN_LIMITS[plan]
+    if hours_used >= limits["hours"] or images_used >= limits["images"]:
+        return False
+    return True
 
-</body>
-</html>
+def increment_usage(user_id, images=0, hours=0.1):
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("UPDATE users SET hours_used=hours_used+?, images_used=images_used+? WHERE id=?",(hours,images,user_id))
+    conn.commit()
+    conn.close()
+
+# --- Rotas ---
+@app.route("/", methods=["GET"])
+def index():
+    if "user_id" in session:
+        return redirect(url_for("chat"))
+    return render_template_string(login_template)
+
+@app.route("/register", methods=["POST"])
+def register():
+    full_name=request.form["full_name"]
+    nickname=request.form["nickname"]
+    email=request.form["email"]
+    password=request.form["password"]
+    if add_user(full_name,nickname,email,password):
+        return "Cadastro realizado! <a href='/'>Voltar para login</a>"
+    else:
+        return "Erro: email já cadastrado! <a href='/'>Voltar</a>"
+
+@app.route("/login", methods=["POST"])
+def login():
+    email=request.form["email"]
+    password=request.form["password"]
+    user=get_user_by_email(email)
+    if user and user[3]==password:
+        session["user_id"]=user[0]
+        session["nickname"]=user[2]
+        session["plan"]=user[5]
+        # zera a conversa se limite atingido
+        if not check_limits(user):
+            session["blocked"]=True
+        else:
+            session["blocked"]=False
+        return redirect(url_for("chat"))
+    return "Login ou senha inválidos! <a href='/'>Voltar</a>"
+
+@app.route("/chat", methods=["GET"])
+def chat():
+    if "user_id" not in session:
+        return redirect(url_for("index"))
+    if session.get("blocked",False):
+        return "Você atingiu o limite do seu plano. <br>Atualize para Plus/Pro via Pix 71982513027 e inicie uma nova conversa. <a href='/logout'>Sair</a>"
+    return render_template_string(chat_template,nickname=session["nickname"],plan=session["plan"])
+
+@app.route("/send_message", methods=["POST"])
+def send_message():
+    if "user_id" not in session:
+        return jsonify({"answer":"Faça login primeiro"})
+    user=get_user_by_email_by_id(session["user_id"])
+    if not check_limits(user):
+        session["blocked"]=True
+        return jsonify({"answer":"Você atingiu o limite do seu plano. Inicie nova conversa."})
+    data=request.get_json()
+    msg=data["message"]
+    add_message(session["user_id"],"user",msg)
+    increment_usage(session["user_id"])
+    ans=generate_answer(msg)
+    add_message(session["user_id"],"bot",ans["answer"])
+    return jsonify(ans)
+
+def get_user_by_email_by_id(user_id):
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("SELECT * FROM users WHERE id=?",(user_id,))
+    user=c.fetchone()
+    conn.close()
+    return user
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("index"))
+
+# --- Rodar ---
+if __name__=="__main__":
+    app.run(debug=True)
